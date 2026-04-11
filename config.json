@@ -1,0 +1,14 @@
+{
+  "total_revenue": {
+    "green": 1000,
+    "yellow": 500
+  },
+  "avg_order_value": {
+    "green": 50,
+    "yellow": 30
+  },
+  "monthly_growth": {
+    "green": 0.10,
+    "yellow": 0.02
+  }
+}
