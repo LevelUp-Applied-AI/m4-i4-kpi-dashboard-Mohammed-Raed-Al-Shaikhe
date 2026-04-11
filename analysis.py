@@ -11,6 +11,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from sqlalchemy import create_engine
+import plotly.express as px
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
 
 
 # -------------------------
@@ -48,25 +51,35 @@ def extract_data(engine):
 # KPI Computation
 # -------------------------
 def compute_kpis(data_dict):
-    import pandas as pd
 
     customers = data_dict["customers"]
     products = data_dict["products"]
     orders = data_dict["orders"]
     order_items = data_dict["order_items"]
 
-    # Merge all tables
-    df = (
-        order_items
-        .merge(orders, on="order_id")
-        .merge(products, on="product_id")
-        .merge(customers, on="customer_id")
+    # -----------------------
+    # Clean & Correct Merges
+    # -----------------------
+    df = order_items.merge(products, on="product_id", how="left")
+
+    df = df.merge(
+        orders[["order_id", "customer_id", "order_date"]],
+        on="order_id",
+        how="left"
     )
 
-    # Ensure datetime format
+    df = df.merge(
+        customers[["customer_id", "city"]],
+        on="customer_id",
+        how="left"
+    )
+
+    # -----------------------
+    # Data Preparation
+    # -----------------------
     df["order_date"] = pd.to_datetime(df["order_date"])
 
-    # Compute revenue per row
+    # Revenue calculation
     df["revenue"] = df["quantity"] * df["unit_price"]
 
     # -----------------------
@@ -75,7 +88,7 @@ def compute_kpis(data_dict):
     total_revenue = df["revenue"].sum()
 
     # -----------------------
-    # KPI 2: Monthly Revenue (TIME-BASED)
+    # KPI 2: Monthly Revenue
     # -----------------------
     monthly_revenue = (
         df.groupby(df["order_date"].dt.to_period("M"))["revenue"]
@@ -83,58 +96,38 @@ def compute_kpis(data_dict):
     )
 
     # -----------------------
-    # KPI 3: Month-over-Month Growth (TIME-BASED)
+    # KPI 3: Monthly Growth
     # -----------------------
     monthly_growth = monthly_revenue.pct_change()
 
     # -----------------------
-    # KPI 4: Customer Cohort Revenue (COHORT KPI)
+    # KPI 4: Cohort Revenue
     # -----------------------
-    # First purchase date per customer
     df["first_order_date"] = df.groupby("customer_id")["order_date"].transform("min")
-
-    # Cohort = first purchase month
     df["cohort"] = df["first_order_date"].dt.to_period("M")
-
-    # Revenue per cohort
     cohort_revenue = df.groupby("cohort")["revenue"].sum()
 
     # -----------------------
     # KPI 5: Revenue by Category
     # -----------------------
-    revenue_by_category = (
-        df.groupby("category")["revenue"]
-        .sum()
-        .sort_values(ascending=False)
-    )
+    revenue_by_category = df.groupby("category")["revenue"].sum()
 
     # -----------------------
-    # KPI 6 (Optional but useful): Average Order Value
+    # KPI 6: Average Order Value
     # -----------------------
-    avg_order_value = (
-        df.groupby("order_id")["revenue"]
-        .sum()
-        .mean()
-    )
+    avg_order_value = df.groupby("order_id")["revenue"].sum().mean()
 
     # -----------------------
-    # Revenue by City (useful segmentation)
+    # Revenue by City
     # -----------------------
-    revenue_by_city = (
-        df.groupby("city")["revenue"]
-        .sum()
-        .sort_values(ascending=False)
-    )
+    revenue_by_city = df.groupby("city")["revenue"].sum()
 
     return {
         "df": df,
-
         "total_revenue": total_revenue,
         "monthly_revenue": monthly_revenue,
         "monthly_growth": monthly_growth,
-
         "cohort_revenue": cohort_revenue,
-
         "revenue_by_category": revenue_by_category,
         "avg_order_value": avg_order_value,
         "revenue_by_city": revenue_by_city,
@@ -145,8 +138,6 @@ def compute_kpis(data_dict):
 # Statistical Tests
 # -------------------------
 def run_statistical_tests(data_dict):
-    import numpy as np
-    from scipy import stats
 
     df = data_dict["df"]
     results = {}
@@ -227,9 +218,6 @@ def run_statistical_tests(data_dict):
 # Visualizations
 # -------------------------
 def create_visualizations(kpi_results, stat_results):
-    import os
-    import matplotlib.pyplot as plt
-    import seaborn as sns
 
     os.makedirs("output", exist_ok=True)
 
@@ -320,6 +308,46 @@ def create_visualizations(kpi_results, stat_results):
     plt.close()
 
 
+
+def create_interactive_dashboard(kpis):
+
+    df = kpis["df"].copy()
+
+    # Prepare data
+    monthly_revenue = (
+        df.groupby(df["order_date"].dt.to_period("M"))["revenue"]
+        .sum()
+        .reset_index()
+    )
+    monthly_revenue["order_date"] = monthly_revenue["order_date"].astype(str)
+
+    revenue_by_category = kpis["revenue_by_category"].reset_index()
+    revenue_by_city = kpis["revenue_by_city"].reset_index()
+
+    # Create figures
+    fig1 = px.line(monthly_revenue, x="order_date", y="revenue",
+                title="Monthly Revenue Trend")
+
+    fig2 = px.bar(revenue_by_category, x="category", y="revenue",
+                title="Revenue by Category")
+
+    fig3 = px.bar(revenue_by_city, x="city", y="revenue",
+                title="Revenue by City")
+
+    os.makedirs("output", exist_ok=True)
+
+    # Combine into ONE HTML file
+    with open("output/dashboard.html", "w", encoding="utf-8") as f:
+        f.write("<html><head><title>KPI Dashboard</title></head><body>")
+        f.write("<h1>KPI Dashboard</h1>")
+
+        f.write(fig1.to_html(full_html=False, include_plotlyjs="cdn"))
+        f.write(fig2.to_html(full_html=False, include_plotlyjs=False))
+        f.write(fig3.to_html(full_html=False, include_plotlyjs=False))
+
+        f.write("</body></html>")
+
+
 # -------------------------
 # Main
 # -------------------------
@@ -331,6 +359,8 @@ def main():
     stats_results = run_statistical_tests(kpis)
 
     create_visualizations(kpis, stats_results)
+
+    create_interactive_dashboard(kpis)
 
     print("\n=== KPI SUMMARY ===")
     print("Total Revenue:", kpis["total_revenue"])
